@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ប្រព័ន្ធមេក្រូហៅឈ្មោះ (ID ខ្លី)</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <link rel="stylesheet" href="syt.css">
+<div class="container">
+    <h2>📢 ប្រព័ន្ធមេក្រូហៅឈ្មោះ</h2>
+
+    <!-- ជ្រើសរើសតួនាទី -->
+    <div class="role-selection">
+        <button class="role-btn" id="btnRoleSpeaker" onclick="setRole('receiver')">🔊 ទូរស័ព្ទអ្នកស្តាប់<br><small>(ដាក់តាមបន្ទប់)</small></button>
+        <button class="role-btn" id="btnRoleMic" onclick="setRole('sender')">🎙️ ទូរស័ព្ទអ្នកនិយាយ<br><small>(អ្នកហៅឈ្មោះ)</small></button>
+    </div>
+
+    <!-- ១. សម្រាប់ទូរស័ព្ទអ្នកស្តាប់ (Receiver) -->
+    <div id="receiverBox" class="box">
+        <div style="text-align: center;">
+            <div id="listenStatus" class="status-badge status-off">រង់ចាំការភ្ជាប់...</div>
+            <p style="font-size: 13px; color: #666;">លេខកូដខ្លីសម្រាប់ដាក់ឱ្យអ្នកហៅឈ្មោះ៖</p>
+            <div class="id-display" id="myReceiverId">...</div>
+        </div>
+        <audio id="audioPlayer" autoplay style="display:none;"></audio>
+    </div>
+
+    <!-- ២. សម្រាប់ទូរស័ព្ទអ្នកហៅឈ្មោះ (Sender) -->
+    <div id="senderBox" class="box">
+        <div style="text-align: center;">
+            <div id="sendStatus" class="status-badge status-off">មិនទាន់ភ្ជាប់</div>
+        </div>
+        
+        <label style="font-size: 13px; font-weight: bold;">បញ្ចូលលេខកូដខ្លី (៤ខ្ទង់) របស់អ្នកស្តាប់៖</label>
+        <div style="display: flex; gap: 5px;">
+            <input type="text" id="receiverIdInput" placeholder="ឧទាហរណ៍៖ 8291" maxlength="4">
+            <button onclick="addReceiver()" style="padding: 10px 15px; background: #16a34a; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">➕ បន្ថែម</button>
+        </div>
+
+        <p style="font-size: 13px; margin: 8px 0 3px 0; font-weight: bold;">បញ្ជីលេខកូដអ្នកស្តាប់ដែលបានបន្ថែម៖</p>
+        <ul id="receiverList">
+            <i style="color: #999;">នៅមិនទាន់មានលេខកូដ</i>
+        </ul>
+
+        <button class="action-btn" onclick="connectAllReceivers()">🔗 ចុចភ្ជាប់ជាមួយអ្នកស្តាប់ទាំងអស់</button>
+
+        <div id="micControls" style="display: none; text-align: center;">
+            <button id="talkBtn" class="btn-talk" 
+                    onmousedown="startSpeech()" onmouseup="stopSpeed()" 
+                    ontouchstart="startSpeech(event)" ontouchend="stopSpeed(event)">
+                🎙️ ចុចឱ្យជាប់<br>ដើម្បីនិយាយ
+            </button>
+            <p style="font-size: 11px; color: #777; margin-top: 8px;">ចុចឱ្យជាប់ពេលនិយាយ លែងដៃវិញពេលនិយាយរួច</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    let peer;
+    let localStream;
+    let receiverIds = [];
+    let activeCalls = [];
+
+    // បង្កើតលេខកូដខ្លីចៃដន្យ ៤ ខ្ទង់ (ពី 1000 ដល់ 9999)
+    function generateShortId() {
+        return Math.floor(1000 + Math.random() * 9000).toString();
+    }
+
+    function setRole(role) {
+        document.getElementById('btnRoleSpeaker').classList.toggle('active', role === 'receiver');
+        document.getElementById('btnRoleMic').classList.toggle('active', role === 'sender');
+        document.getElementById('receiverBox').style.display = role === 'receiver' ? 'block' : 'none';
+        document.getElementById('senderBox').style.display = role === 'sender' ? 'block' : 'none';
+
+        if (role === 'receiver') {
+            initReceiver();
+        } else if (role === 'sender') {
+            initSender();
+        }
+    }
+
+    function initReceiver() {
+        if (peer) peer.destroy();
+        
+        // បង្កើត ID ខ្លីត្រឹម ៤ ខ្ទង់
+        const shortId = generateShortId();
+        peer = new Peer(shortId);
+
+        peer.on('open', (id) => {
+            document.getElementById('myReceiverId').innerText = id;
+        });
+
+        peer.on('error', (err) => {
+            // ប្រសិនបើចៃដន្យជាន់គ្នា ឱ្យវាបង្កើតម្តងទៀតស្វ័យប្រវត្តិ
+            if (err.type === 'unavailable-id') {
+                initReceiver();
+            }
+        });
+
+        peer.on('call', (call) => {
+            call.answer();
+            call.on('stream', (remoteStream) => {
+                const audio = document.getElementById('audioPlayer');
+                audio.srcObject = remoteStream;
+                audio.play();
+
+                const badge = document.getElementById('listenStatus');
+                badge.innerText = '🟢 កំពុងភ្ជាប់ (ព្រមស្តាប់)';
+                badge.className = 'status-badge status-on';
+            });
+        });
+    }
+
+    function initSender() {
+        if (peer) peer.destroy();
+        peer = new Peer(); // អ្នកហៅមិនបាច់ចាំបាច់ដាក់ ID ខ្លីក៏បាន
+    }
+
+    function addReceiver() {
+        const input = document.getElementById('receiverIdInput');
+        const id = input.value.trim();
+        if (!id) return;
+
+        if (!receiverIds.includes(id)) {
+            receiverIds.push(id);
+            updateReceiverListUI();
+        }
+        input.value = '';
+    }
+
+    function updateReceiverListUI() {
+        const listEl = document.getElementById('receiverList');
+        if (receiverIds.length === 0) {
+            listEl.innerHTML = '<i style="color: #999;">នៅមិនទាន់មានលេខកូដ</i>';
+            return;
+        }
+        listEl.innerHTML = '';
+        receiverIds.forEach((id, index) => {
+            const li = document.createElement('li');
+            li.innerHTML = `បន្ទប់ទី ${index + 1} (កូដ: <b>${id}</b>)`;
+            listEl.appendChild(li);
+        });
+    }
+
+    async function connectAllReceivers() {
+        if (receiverIds.length === 0) {
+            alert('សូមបញ្ចូលលេខកូដអ្នកស្តាប់យ៉ាងហោចណាស់ ១!');
+            return;
+        }
+
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            localStream.getAudioTracks()[0].enabled = false;
+
+            activeCalls = [];
+            receiverIds.forEach(id => {
+                const call = peer.call(id, localStream);
+                activeCalls.push(call);
+            });
+
+            const badge = document.getElementById('sendStatus');
+            badge.innerText = `🟢 បានភ្ជាប់ជាមួយអ្នកស្តាប់ចំនួន ${receiverIds.length} គ្រឿង`;
+            badge.className = 'status-badge status-on';
+            document.getElementById('micControls').style.display = 'block';
+            alert('ការតភ្ជាប់ទទួលបានជោគជ័យ!');
+
+        } catch (err) {
+            alert('មិនអាចបើក មីក្រូហ្វូន បានទេ៖ ' + err.message);
+        }
+    }
+
+    function startSpeech(e) {
+        if (e && e.cancelable) e.preventDefault();
+        if (localStream) {
+            localStream.getAudioTracks()[0].enabled = true;
+            const btn = document.getElementById('talkBtn');
+            btn.classList.add('speaking');
+            btn.innerHTML = '🔊 កំពុងផ្សាយ...<br><small>លែងដៃដើម្បីឈប់</small>';
+        }
+    }
+
+    function stopSpeech(e) {
+        if (e && e.cancelable) e.preventDefault();
+        if (localStream) {
+            localStream.getAudioTracks()[0].enabled = false;
+            const btn = document.getElementById('talkBtn');
+            btn.classList.remove('speaking');
+            btn.innerHTML = '🎙️ ចុចឱ្យជាប់<br>ដើម្បីនិយាយ';
+        }
+    }
+</script>
+
+</body>
+</html>
